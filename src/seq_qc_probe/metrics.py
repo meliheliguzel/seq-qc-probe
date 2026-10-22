@@ -111,6 +111,10 @@ class SequenceQCAccumulator:
                 n_content_percent=0.0,
                 adapter_contaminated_reads=0,
                 adapter_contamination_rate=0.0,
+                gc_bases=0,
+                q20_bases=0,
+                q30_bases=0,
+                n_bases=0,
             )
 
         main_average_quality = (
@@ -144,6 +148,10 @@ class SequenceQCAccumulator:
             n_content_percent=n_content_percent,
             adapter_contaminated_reads=self.adapter_reads,
             adapter_contamination_rate=adapter_contamination_rate,
+            gc_bases=self.total_gc_bases,
+            q20_bases=self.q20_bases,
+            q30_bases=self.q30_bases,
+            n_bases=self.n_bases,
         )
 
 
