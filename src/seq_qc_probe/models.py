@@ -50,3 +50,23 @@ class SequenceQCMetricsSummary:
     q20_percent: float = 0.0
     q30_percent: float = 0.0
     n_content_percent: float = 0.0
+    gc_bases: int = 0
+    q20_bases: int = 0
+    q30_bases: int = 0
+    n_bases: int = 0
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """Encapsulates the complete outcome of a sequence validation run."""
+
+    input_file: str
+    min_quality: float
+    max_errors: int
+    total_records: int
+    total_errors: int
+    errors: list[FASTQValidationError]
+    summary: SequenceQCMetricsSummary
+    status: str
+    exit_code: int
+    error_message: str | None = None
