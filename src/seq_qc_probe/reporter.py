@@ -1,0 +1,178 @@
+import json
+import sys
+import textwrap
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, TextIO
+
+from .models import CheckResult
+from .version import __version__
+
+
+class QCReporter:
+    """Handles serialization and formatting of quality control results."""
+
+    def __init__(self, result: CheckResult) -> None:
+        self.result = result
+
+    def to_dict(self) -> dict[str, Any]:
+        """Builds a comprehensive, hierarchical JSON-serializable report dictionary."""
+        res = self.result
+        summary = res.summary
+
+        # Calculate normalized rates (0.0 to 1.0)
+        q20_rate = (
+            round(summary.q20_percent / 100.0, 4) if summary.total_bases_evaluated > 0 else 0.0
+        )
+        q30_rate = (
+            round(summary.q30_percent / 100.0, 4) if summary.total_bases_evaluated > 0 else 0.0
+        )
+        gc_rate = (
+            round(summary.gc_content_percent / 100.0, 4)
+            if summary.total_bases_evaluated > 0
+            else 0.0
+        )
+        n_rate = (
+            round(summary.n_content_percent / 100.0, 6)
+            if summary.total_bases_evaluated > 0
+            else 0.0
+        )
+        contamination_rate = (
+            round(summary.adapter_contamination_rate / 100.0, 4)
+            if summary.total_reads_evaluated > 0
+            else 0.0
+        )
+
+        # Standardized ISO UTC timestamp
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        return {
+            "schema_version": "1.0.0",
+            "meta": {
+                "tool": "seq-qc-probe",
+                "version": __version__,
+                "command": "check",
+                "timestamp": timestamp,
+                "input_file": res.input_file,
+                "thresholds": {
+                    "min_quality": res.min_quality,
+                    "max_errors": res.max_errors,
+                },
+            },
+            "quality_gate": {
+                "status": res.status,
+                "exit_code": res.exit_code,
+                "passed": res.exit_code == 0,
+                "structural_valid": res.total_errors == 0,
+                "quality_threshold_met": summary.mean_quality_score >= res.min_quality,
+                "total_errors": res.total_errors,
+                "errors": [
+                    {
+                        "line_number": err.line_number,
+                        "error_kind": err.error_kind.name,
+                        "message": err.message,
+                    }
+                    for err in res.errors
+                ],
+            },
+            "summary": {
+                "total_reads": summary.total_reads_evaluated,
+                "total_bases": summary.total_bases_evaluated,
+                "mean_quality_score": round(summary.mean_quality_score, 2),
+                "gc_bases": summary.gc_bases,
+                "gc_rate": gc_rate,
+                "gc_percent": round(summary.gc_content_percent, 2),
+                "n_bases": summary.n_bases,
+                "n_rate": n_rate,
+                "n_percent": round(summary.n_content_percent, 4),
+                "q20_bases": summary.q20_bases,
+                "q20_rate": q20_rate,
+                "q20_percent": round(summary.q20_percent, 2),
+                "q30_bases": summary.q30_bases,
+                "q30_rate": q30_rate,
+                "q30_percent": round(summary.q30_percent, 2),
+            },
+            "contamination": {
+                "adapter_name": "Illumina Universal Adapter",
+                "adapter_sequence": "AGATCGGAAGAGC",
+                "contaminated_reads": summary.adapter_contaminated_reads,
+                "contamination_rate": contamination_rate,
+                "contamination_percent": round(summary.adapter_contamination_rate, 2),
+            },
+            "distributions": {
+                "per_cycle_mean_quality": [round(q, 2) for q in summary.positions_average_quality],
+                "read_quality_histogram": summary.read_quality_distribution,
+            },
+            # Top-level backwards compatibility fields for v0.1.0 consumers
+            "status": res.status,
+            "total_records": res.total_records,
+            "total_errors": res.total_errors,
+            "total_reads_evaluated": summary.total_reads_evaluated,
+            "total_bases_evaluated": summary.total_bases_evaluated,
+            "mean_quality_score": round(summary.mean_quality_score, 2),
+            "q20_percent": round(summary.q20_percent, 2),
+            "q30_percent": round(summary.q30_percent, 2),
+            "gc_content_percent": round(summary.gc_content_percent, 2),
+            "n_content_percent": round(summary.n_content_percent, 2),
+            "adapter_contaminated_reads": summary.adapter_contaminated_reads,
+            "adapter_contamination_rate": round(summary.adapter_contamination_rate, 2),
+            "positions_average_quality": [round(q, 2) for q in summary.positions_average_quality],
+            "read_quality_distribution": summary.read_quality_distribution,
+        }
+
+    def format_text_summary(self) -> str:
+        """Formats standard human-readable terminal output."""
+        res = self.result
+        summary = res.summary
+
+        if res.status == "PASSED":
+            return textwrap.dedent(f"""\
+                Validation PASSED: {res.total_records} valid records processed with zero errors.
+
+                Total Reads Evaluated: {summary.total_reads_evaluated}
+                Total Bases Evaluated: {summary.total_bases_evaluated}
+                Mean Quality Score: {summary.mean_quality_score:.2f}
+                Q20 Percent: {summary.q20_percent:.2f}%
+                Q30 Percent: {summary.q30_percent:.2f}%
+                GC Content Percent: {summary.gc_content_percent:.2f}%
+                N Content Percent: {summary.n_content_percent:.2f}%
+                Adapter Contaminated Reads: {summary.adapter_contaminated_reads}
+                Adapter Contamination Rate: {summary.adapter_contamination_rate:.2f}%
+            """)
+        return ""
+
+    def print_terminal_summary(
+        self, stdout: TextIO | None = None, stderr: TextIO | None = None
+    ) -> None:
+        """Prints terminal summary and failure notifications."""
+        out = sys.stdout if stdout is None else stdout
+        err = sys.stderr if stderr is None else stderr
+
+        res = self.result
+        summary = res.summary
+
+        if res.status == "PASSED":
+            out.write(self.format_text_summary())
+        else:
+            if res.total_errors > 0:
+                err.write(
+                    f"\nValidation FAILED: Found {res.total_errors} error(s) "
+                    f"across {res.total_records} valid records.\n"
+                )
+            if summary.mean_quality_score < res.min_quality:
+                err.write(
+                    f"\nValidation FAILED: Mean quality score {summary.mean_quality_score:.2f} "
+                    f"is below the minimum threshold of {res.min_quality}.\n"
+                )
+
+    def print_json(self, stream: TextIO | None = None) -> None:
+        """Prints formatted JSON report to the given stream."""
+        out = sys.stdout if stream is None else stream
+        out.write(json.dumps(self.to_dict(), indent=2) + "\n")
+
+    def write_json(self, file_path: str | Path) -> None:
+        """Writes formatted JSON report directly to a file."""
+        target = Path(file_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self.to_dict(), indent=2) + "\n")
