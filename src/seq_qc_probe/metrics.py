@@ -10,7 +10,7 @@ def is_adapter_contaminated(
     min_overlap: int = 8,
     max_mismatches: int = 1,
 ) -> bool:
-    """Detects Illumina adapter contamination.
+    """Detects Illumina adapter contamination using fast C-level filters and Pigeonhole principle.
 
     Supports partial 3' overlap or full match with mismatch tolerance.
     """
@@ -19,11 +19,23 @@ def is_adapter_contaminated(
     seq_len = len(seq_upper)
 
     if seq_len >= adapter_len:
-        for i in range(seq_len - adapter_len + 1):
-            sub = seq_upper[i : i + adapter_len]
-            mismatches = sum(1 for a, b in zip(sub, adapter, strict=True) if a != b)
-            if mismatches <= max_mismatches:
-                return True
+        if adapter in seq_upper:
+            return True
+
+        mid = adapter_len // 2
+        part1 = adapter[:mid]
+        part2 = adapter[mid:]
+        if max_mismatches > 1 or (part1 in seq_upper or part2 in seq_upper):
+            for i in range(seq_len - adapter_len + 1):
+                sub = seq_upper[i : i + adapter_len]
+                mismatches = 0
+                for a, b in zip(sub, adapter, strict=True):
+                    if a != b:
+                        mismatches += 1
+                        if mismatches > max_mismatches:
+                            break
+                if mismatches <= max_mismatches:
+                    return True
 
     max_prefix = min(adapter_len - 1, seq_len)
     return any(seq_upper.endswith(adapter[:k]) for k in range(max_prefix, min_overlap - 1, -1))
@@ -58,41 +70,53 @@ class SequenceQCAccumulator:
         self.adapter_reads = 0
 
     def accumulate(self, record: FASTQRecord) -> float:
-        """Accumulate quality metrics from a single FASTQ record."""
+        """Accumulate quality metrics from a single FASTQ record in a single pass."""
         if not record.quality:
             return 0.0
 
         self.total_reads += 1
-        quality_scores = [ord(char) - 33 for char in record.quality]
 
         seq_upper = record.sequence.upper()
         self.total_bases += len(seq_upper)
         self.total_gc_bases += seq_upper.count("G") + seq_upper.count("C")
         self.n_bases += seq_upper.count("N")
 
-        for score in quality_scores:
-            self.total_quality_sum += score
-            if score >= 20:
-                self.q20_bases += 1
-            if score >= 30:
-                self.q30_bases += 1
-
         if is_adapter_contaminated(seq_upper):
             self.adapter_reads += 1
 
-        read_mean: float = sum(quality_scores) / len(quality_scores)
+        read_qual_sum = 0
+        q20_add = 0
+        q30_add = 0
+        pos_sums = self.position_quality_sums
+        pos_counts = self.position_counts
+        pos_len = len(pos_sums)
+        q_len = len(record.quality)
+
+        for i, char in enumerate(record.quality):
+            score = ord(char) - 33
+            read_qual_sum += score
+            if score >= 20:
+                q20_add += 1
+                if score >= 30:
+                    q30_add += 1
+
+            if i < pos_len:
+                pos_sums[i] += score
+                pos_counts[i] += 1
+            else:
+                pos_sums.append(score)
+                pos_counts.append(1)
+                pos_len += 1
+
+        self.total_quality_sum += read_qual_sum
+        self.q20_bases += q20_add
+        self.q30_bases += q30_add
+
+        read_mean: float = read_qual_sum / q_len
         rounded_mean = round(read_mean)
         self.read_quality_distribution[rounded_mean] = (
             self.read_quality_distribution.get(rounded_mean, 0) + 1
         )
-
-        for i, score in enumerate(quality_scores):
-            if i >= len(self.position_quality_sums):
-                self.position_quality_sums.append(score)
-                self.position_counts.append(1)
-            else:
-                self.position_quality_sums[i] += score
-                self.position_counts[i] += 1
 
         return read_mean
 
