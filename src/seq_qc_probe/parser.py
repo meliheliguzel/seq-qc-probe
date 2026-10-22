@@ -7,6 +7,7 @@ from typing import TextIO
 from .models import FASTQErrorKind, FASTQRecord, FASTQValidationError
 
 VALID_BASES = frozenset("ACGTNacgtn")
+_INVALID_BASE_TRANSLATOR = str.maketrans("", "", "ACGTNacgtn")
 
 
 def _open_stream(file_path: str | Path) -> tuple[TextIO, bool]:
@@ -117,7 +118,7 @@ def parse_and_validate_fastq(
                     record=rec,
                 )
                 has_error = True
-            elif not set(sequence).issubset(VALID_BASES):
+            elif bool(sequence.translate(_INVALID_BASE_TRANSLATOR)):
                 yield FASTQValidationError(
                     line_number=start_line + 1,
                     error_kind=FASTQErrorKind.INVALID_SEQUENCE,
