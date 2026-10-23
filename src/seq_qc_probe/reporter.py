@@ -1,16 +1,55 @@
 import json
 import sys
 import textwrap
+from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from .models import CheckResult
+from .models import CheckResult, VCFValidationSummary
 from .version import __version__
 
 
-class QCReporter:
-    """Handles serialization and formatting of quality control results."""
+class BaseReporter(ABC):
+    """Abstract base reporter providing standard JSON serialization and I/O utilities."""
+
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        """Builds a structured, JSON-serializable dictionary report."""
+        ...
+
+    @abstractmethod
+    def format_text_summary(self) -> str:
+        """Formats human-readable terminal output."""
+        ...
+
+    @abstractmethod
+    def print_terminal_summary(
+        self, stdout: TextIO | None = None, stderr: TextIO | None = None
+    ) -> None:
+        """Prints terminal summary and failure notifications."""
+        ...
+
+    @staticmethod
+    def get_iso_timestamp() -> str:
+        """Returns standardized ISO 8601 UTC timestamp."""
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def print_json(self, stream: TextIO | None = None) -> None:
+        """Prints formatted JSON report to the given stream."""
+        out = sys.stdout if stream is None else stream
+        out.write(json.dumps(self.to_dict(), indent=2) + "\n")
+
+    def write_json(self, file_path: str | Path) -> None:
+        """Writes formatted JSON report directly to a file."""
+        target = Path(file_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self.to_dict(), indent=2) + "\n")
+
+
+class QCReporter(BaseReporter):
+    """Handles serialization and formatting of FASTQ quality control results."""
 
     def __init__(self, result: CheckResult) -> None:
         self.result = result
@@ -43,8 +82,7 @@ class QCReporter:
             else 0.0
         )
 
-        # Standardized ISO UTC timestamp
-        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp = self.get_iso_timestamp()
 
         return {
             "schema_version": "1.0.0",
@@ -121,7 +159,7 @@ class QCReporter:
         }
 
     def format_text_summary(self) -> str:
-        """Formats standard human-readable terminal output."""
+        """Formats standard human-readable terminal output for FASTQ QC."""
         res = self.result
         summary = res.summary
 
@@ -144,7 +182,7 @@ class QCReporter:
     def print_terminal_summary(
         self, stdout: TextIO | None = None, stderr: TextIO | None = None
     ) -> None:
-        """Prints terminal summary and failure notifications."""
+        """Prints terminal summary and failure notifications for FASTQ QC."""
         out = sys.stdout if stdout is None else stdout
         err = sys.stderr if stderr is None else stderr
 
@@ -165,14 +203,97 @@ class QCReporter:
                     f"is below the minimum threshold of {res.min_quality}.\n"
                 )
 
-    def print_json(self, stream: TextIO | None = None) -> None:
-        """Prints formatted JSON report to the given stream."""
-        out = sys.stdout if stream is None else stream
-        out.write(json.dumps(self.to_dict(), indent=2) + "\n")
 
-    def write_json(self, file_path: str | Path) -> None:
-        """Writes formatted JSON report directly to a file."""
-        target = Path(file_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(json.dumps(self.to_dict(), indent=2) + "\n")
+class VCFReporter(BaseReporter):
+    """Handles serialization and formatting of VCF validation results."""
+
+    def __init__(
+        self,
+        summary: VCFValidationSummary,
+        input_file: str | Path = "",
+        max_errors: int | None = None,
+    ) -> None:
+        self.summary = summary
+        self.input_file = str(input_file)
+        self.max_errors = max_errors
+
+    def to_dict(self) -> dict[str, Any]:
+        """Builds a structured JSON-serializable dictionary report for VCF validation."""
+        s = self.summary
+        error_dist = {kind.name: count for kind, count in s.error_distribution.items() if count > 0}
+        return {
+            "schema_version": "1.0.0",
+            "meta": {
+                "tool": "seq-qc-probe",
+                "version": __version__,
+                "command": "vcf-check",
+                "timestamp": self.get_iso_timestamp(),
+                "input_file": self.input_file,
+                "thresholds": {
+                    "max_errors": self.max_errors,
+                },
+            },
+            "validation_gate": {
+                "status": "PASSED" if s.is_valid else "FAILED",
+                "passed": s.is_valid,
+                "exit_code": 0 if s.is_valid else 1,
+                "total_errors": s.total_errors,
+                "error_distribution": error_dist,
+                "errors": [
+                    {
+                        "line_number": err.line_number,
+                        "error_kind": err.error_kind.name,
+                        "message": err.message,
+                        "column": err.column,
+                    }
+                    for err in s.errors
+                ],
+            },
+            "summary": {
+                "total_records_evaluated": s.total_records_evaluated,
+                "total_errors": s.total_errors,
+                "is_valid": s.is_valid,
+            },
+        }
+
+    def format_text_summary(self) -> str:
+        """Formats standard human-readable terminal output for VCF validation."""
+        s = self.summary
+        if s.is_valid:
+            return textwrap.dedent(f"""\
+                Validation PASSED: VCF 4.2 file is valid.
+                Total Records Evaluated: {s.total_records_evaluated}
+                Total Errors: 0
+            """)
+
+        lines = [
+            f"Validation FAILED: Found {s.total_errors} error(s) "
+            f"across {s.total_records_evaluated} record(s).",
+            "",
+            "Error Breakdown:",
+        ]
+        for kind, count in s.error_distribution.items():
+            if count > 0:
+                lines.append(f"  - {kind.name}: {count}")
+
+        if s.errors:
+            lines.append("")
+            lines.append("Errors:")
+            for err in s.errors:
+                col_info = f" (Column: {err.column})" if err.column else ""
+                lines.append(
+                    f"  [Line {err.line_number}] [{err.error_kind.name}] {err.message}{col_info}"
+                )
+        return "\n".join(lines) + "\n"
+
+    def print_terminal_summary(
+        self, stdout: TextIO | None = None, stderr: TextIO | None = None
+    ) -> None:
+        """Prints terminal summary to stdout or stderr depending on pass/fail."""
+        out = sys.stdout if stdout is None else stdout
+        err = sys.stderr if stderr is None else stderr
+
+        if self.summary.is_valid:
+            out.write(self.format_text_summary())
+        else:
+            err.write(self.format_text_summary())
