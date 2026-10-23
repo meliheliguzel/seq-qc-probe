@@ -8,7 +8,6 @@ VALID_BASES = frozenset("ACGTNacgtn")
 _INVALID_BASE_TRANSLATOR = str.maketrans("", "", "ACGTNacgtn")
 
 
-
 def parse_and_validate_fastq(
     file_path: str | Path,
 ) -> Iterator[FASTQRecord | FASTQValidationError]:
