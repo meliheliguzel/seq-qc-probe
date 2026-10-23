@@ -147,7 +147,7 @@ def test_meta_line_after_header_fails(tmp_path: Path):
     bad_vcf.write_text(
         "##fileformat=VCFv4.2\n"
         "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
-        "##FILTER=<ID=PASS,Description=\"All filters passed\">\n"
+        '##FILTER=<ID=PASS,Description="All filters passed">\n'
         "chr1\t100\trs1\tA\tT\t30\tPASS\t.\n"
     )
     validator = VCFValidator(bad_vcf)
@@ -176,7 +176,7 @@ def test_stdin_pipe_support(monkeypatch: pytest.MonkeyPatch):
 def test_meta_only_file_flags_missing_header(tmp_path: Path):
     """Verify that a file with only meta lines triggers missing header error."""
     vcf = tmp_path / "meta_only.vcf"
-    vcf.write_text("##fileformat=VCFv4.2\n##FILTER=<ID=PASS,Description=\"Passed\">\n")
+    vcf.write_text('##fileformat=VCFv4.2\n##FILTER=<ID=PASS,Description="Passed">\n')
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
     assert s.error_distribution[VCFErrorKind.INVALID_HEADER_COLUMNS] >= 1
@@ -186,8 +186,7 @@ def test_first_line_header_without_fileformat(tmp_path: Path):
     """Verify that a file starting directly with #CHROM handles header and missing format."""
     vcf = tmp_path / "no_format_header.vcf"
     vcf.write_text(
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
-        "chr1\t100\trs1\tA\tT\t30\tPASS\t.\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nchr1\t100\trs1\tA\tT\t30\tPASS\t.\n"
     )
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
@@ -208,9 +207,7 @@ def test_empty_key_in_meta(tmp_path: Path):
     """Verify that a meta line like ##=val produces a MALFORMED_LINE error."""
     vcf = tmp_path / "empty_meta_key.vcf"
     vcf.write_text(
-        "##fileformat=VCFv4.2\n"
-        "##=bad_val\n"
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+        "##fileformat=VCFv4.2\n##=bad_val\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
     )
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
@@ -221,8 +218,7 @@ def test_empty_sample_identifier_fails(tmp_path: Path):
     """Verify that whitespace/empty sample identifier is flagged."""
     vcf = tmp_path / "empty_sample.vcf"
     vcf.write_text(
-        "##fileformat=VCFv4.2\n"
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t   \n"
+        "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t   \n"
     )
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
@@ -233,8 +229,7 @@ def test_sample_without_format_tag(tmp_path: Path):
     """Verify that 10th column present without FORMAT at 9th column fails."""
     vcf = tmp_path / "sample_no_format.vcf"
     vcf.write_text(
-        "##fileformat=VCFv4.2\n"
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tNOTFORMAT\tSAMPLE1\n"
+        "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tNOTFORMAT\tSAMPLE1\n"
     )
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
@@ -268,4 +263,3 @@ def test_empty_alt_allele_triggers_invalid_base(tmp_path: Path):
     s = VCFValidator(vcf).validate()
     assert s.is_valid is False
     assert s.error_distribution[VCFErrorKind.INVALID_BASE] >= 1
-
