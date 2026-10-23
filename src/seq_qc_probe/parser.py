@@ -1,31 +1,12 @@
-import gzip
-import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TextIO
 
+from .io import open_stream
 from .models import FASTQErrorKind, FASTQRecord, FASTQValidationError
 
 VALID_BASES = frozenset("ACGTNacgtn")
 _INVALID_BASE_TRANSLATOR = str.maketrans("", "", "ACGTNacgtn")
 
-
-def _open_stream(file_path: str | Path) -> tuple[TextIO, bool]:
-    """Opens a file path or stdin stream, handling gzip transparently.
-
-    Returns the stream and a boolean indicating whether it should be closed upon exit.
-    """
-    path_str = str(file_path)
-    if path_str == "-":
-        return sys.stdin, False
-
-    path = Path(path_str)
-    with open(path, "rb") as f:
-        magic = f.read(2)
-
-    if magic == b"\x1f\x8b":
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace"), True
-    return open(path, encoding="utf-8", errors="replace"), True
 
 
 def parse_and_validate_fastq(
@@ -36,7 +17,7 @@ def parse_and_validate_fastq(
     Enforces strict 4-line block invariant to prevent parser desynchronization.
     Memory footprint is O(1) streaming. Supports plain text, gzip (.gz), and stdin ('-').
     """
-    stream, should_close = _open_stream(file_path)
+    stream, should_close = open_stream(file_path)
     line_number = 0
 
     try:
