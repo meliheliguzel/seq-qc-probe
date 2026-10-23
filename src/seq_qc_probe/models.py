@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 
@@ -70,3 +70,42 @@ class CheckResult:
     status: str
     exit_code: int
     error_message: str | None = None
+
+
+class VCFErrorKind(Enum):
+    """Error types for VCF parsing and validation."""
+
+    INVALID_RECORD = auto()
+    MISSING_FIELD = auto()
+    INVALID_GENOTYPE = auto()
+    PREMATURE_EOF = auto()
+    MISSING_FILEFORMAT = auto()
+    INVALID_HEADER_COLUMNS = auto()
+    INVALID_COORDINATE = auto()
+    INVALID_BASE = auto()
+    MALFORMED_LINE = auto()
+
+
+@dataclass(frozen=True)
+class VCFValidationError:
+    """Represents a structural validation error in a VCF record or stream."""
+
+    line_number: int
+    error_kind: VCFErrorKind
+    message: str
+    column: str | None = None
+
+
+@dataclass
+class VCFValidationSummary:
+    """A summary of the VCF validation metrics for a VCF file."""
+
+    total_records_evaluated: int
+    total_errors: int
+    error_distribution: dict[VCFErrorKind, int]
+    errors: list[VCFValidationError] = field(default_factory=list)
+
+    @property
+    def is_valid(self) -> bool:
+        """Returns True if there are zero errors encountered."""
+        return self.total_errors == 0
