@@ -8,9 +8,13 @@ from .models import (
     FASTQRecord,
     FASTQValidationError,
     SequenceQCMetricsSummary,
+    VCFErrorKind,
+    VCFValidationError,
+    VCFValidationSummary,
 )
 from .parser import parse_and_validate_fastq
 from .reporter import QCReporter
+from .vcf_validator import VCFValidator
 from .version import __version__
 
 __all__ = [
@@ -22,6 +26,10 @@ __all__ = [
     "QCReporter",
     "SequenceQCAccumulator",
     "SequenceQCMetricsSummary",
+    "VCFErrorKind",
+    "VCFValidationError",
+    "VCFValidationSummary",
+    "VCFValidator",
     "__version__",
     "analyze_fastq_file",
     "parse_and_validate_fastq",
