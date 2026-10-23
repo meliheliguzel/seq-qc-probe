@@ -1,7 +1,13 @@
+import io
+import json
 from pathlib import Path
 
+import pytest
+
 from seq_qc_probe.checker import FASTQChecker
-from seq_qc_probe.reporter import QCReporter
+from seq_qc_probe.models import VCFErrorKind, VCFValidationError, VCFValidationSummary
+from seq_qc_probe.reporter import BaseReporter, QCReporter, VCFReporter
+from seq_qc_probe.vcf_validator import VCFValidator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -44,3 +50,154 @@ def test_qc_reporter_hierarchical_structure(tmp_path: Path):
     out_file = tmp_path / "custom" / "report.json"
     reporter.write_json(out_file)
     assert out_file.exists()
+
+
+def test_base_reporter_abstract_instantiation():
+    """Verify BaseReporter cannot be instantiated directly without implementations."""
+    with pytest.raises(TypeError):
+        BaseReporter()  # type: ignore[abstract]
+
+
+def test_base_reporter_timestamp():
+    """Verify BaseReporter.get_iso_timestamp produces an ISO 8601 UTC string."""
+    ts = BaseReporter.get_iso_timestamp()
+    assert ts.endswith("Z")
+    assert "T" in ts
+
+
+def test_vcf_reporter_valid_file(tmp_path: Path):
+    """Verify VCFReporter formats successful validation results into dictionary and text."""
+    vcf_file = FIXTURES_DIR / "valid_vcf42.vcf"
+    validator = VCFValidator(vcf_file)
+    summary = validator.validate()
+
+    reporter = VCFReporter(summary, input_file=vcf_file, max_errors=10)
+    data = reporter.to_dict()
+
+    assert data["schema_version"] == "1.0.0"
+    assert data["meta"]["command"] == "vcf-check"
+    assert data["meta"]["input_file"] == str(vcf_file)
+    assert data["validation_gate"]["status"] == "PASSED"
+    assert data["validation_gate"]["passed"] is True
+    assert data["validation_gate"]["exit_code"] == 0
+    assert data["validation_gate"]["total_errors"] == 0
+    assert data["summary"]["total_records_evaluated"] == 6
+
+    # Test text summary
+    text_summary = reporter.format_text_summary()
+    assert "Validation PASSED" in text_summary
+    assert "Total Records Evaluated: 6" in text_summary
+
+    # Test print_terminal_summary to stdout
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    reporter.print_terminal_summary(stdout=stdout_buf, stderr=stderr_buf)
+    assert "Validation PASSED" in stdout_buf.getvalue()
+    assert stderr_buf.getvalue() == ""
+
+    # Test JSON output writing
+    json_path = tmp_path / "vcf_report.json"
+    reporter.write_json(json_path)
+    assert json_path.exists()
+    loaded = json.loads(json_path.read_text())
+    assert loaded["validation_gate"]["passed"] is True
+
+
+def test_vcf_reporter_failed_file():
+    """Verify VCFReporter properly formats error distribution and messages."""
+    summary = VCFValidationSummary(
+        total_records_evaluated=10,
+        total_errors=2,
+        error_distribution={
+            VCFErrorKind.INVALID_COORDINATE: 1,
+            VCFErrorKind.INVALID_BASE: 1,
+        },
+        errors=[
+            VCFValidationError(
+                line_number=5,
+                error_kind=VCFErrorKind.INVALID_COORDINATE,
+                message="Invalid POS value: 0",
+                column="POS",
+            ),
+            VCFValidationError(
+                line_number=8,
+                error_kind=VCFErrorKind.INVALID_BASE,
+                message="Invalid REF base: X",
+                column="REF",
+            ),
+        ],
+    )
+
+    reporter = VCFReporter(summary, input_file="bad.vcf")
+    data = reporter.to_dict()
+
+    assert data["validation_gate"]["status"] == "FAILED"
+    assert data["validation_gate"]["passed"] is False
+    assert data["validation_gate"]["exit_code"] == 1
+    assert data["validation_gate"]["total_errors"] == 2
+    assert data["validation_gate"]["error_distribution"] == {
+        "INVALID_COORDINATE": 1,
+        "INVALID_BASE": 1,
+    }
+    assert len(data["validation_gate"]["errors"]) == 2
+
+    text = reporter.format_text_summary()
+    assert "Validation FAILED" in text
+    assert "INVALID_COORDINATE: 1" in text
+    assert "INVALID_BASE: 1" in text
+    assert "[Line 5] [INVALID_COORDINATE] Invalid POS value: 0 (Column: POS)" in text
+    assert "[Line 8] [INVALID_BASE] Invalid REF base: X (Column: REF)" in text
+
+    # Test print_terminal_summary sends to stderr on failure
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    reporter.print_terminal_summary(stdout=stdout_buf, stderr=stderr_buf)
+    assert stdout_buf.getvalue() == ""
+    assert "Validation FAILED" in stderr_buf.getvalue()
+
+
+def test_vcf_reporter_print_json_stream():
+    """Verify VCFReporter.print_json serializes correctly to a given stream."""
+    summary = VCFValidationSummary(
+        total_records_evaluated=5,
+        total_errors=0,
+        error_distribution={},
+        errors=[],
+    )
+    reporter = VCFReporter(summary, input_file="test.vcf")
+    buf = io.StringIO()
+    reporter.print_json(stream=buf)
+
+    payload = json.loads(buf.getvalue())
+    assert payload["summary"]["total_records_evaluated"] == 5
+    assert payload["validation_gate"]["status"] == "PASSED"
+
+
+def test_vcf_reporter_failed_without_errors_list():
+    """Verify VCFReporter handles failed summary when error list is empty."""
+    summary = VCFValidationSummary(
+        total_records_evaluated=0,
+        total_errors=1,
+        error_distribution={},
+        errors=[],
+    )
+    reporter = VCFReporter(summary, input_file="empty.vcf")
+    text = reporter.format_text_summary()
+    assert "Validation FAILED: Found 1 error(s)" in text
+    assert "Errors:" not in text
+
+
+def test_qc_reporter_failed_output():
+    """Verify QCReporter terminal output for failed FASTQ validation."""
+    corrupted_file = FIXTURES_DIR / "err_bad_header.fastq"
+    checker = FASTQChecker(input_path=corrupted_file, min_quality=30.0)
+    result = checker.run()
+
+    reporter = QCReporter(result)
+    assert reporter.format_text_summary() == ""
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    reporter.print_terminal_summary(stdout=stdout_buf, stderr=stderr_buf)
+    assert stdout_buf.getvalue() == ""
+    assert "Validation FAILED" in stderr_buf.getvalue()
