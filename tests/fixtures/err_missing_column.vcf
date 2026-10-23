@@ -1,0 +1,3 @@
+##fileformat=VCFv4.2
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER
+chr1	1000	rs123	A	T	50	PASS
