@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from seq_qc_probe.cli import main
+from seq_qc_probe.version import __version__
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -145,7 +146,7 @@ def test_cli_output_json_file(tmp_path: Path):
     # Check hierarchical schema
     assert data["schema_version"] == "1.0.0"
     assert data["meta"]["tool"] == "seq-qc-probe"
-    assert data["meta"]["version"] == "0.1.0"
+    assert data["meta"]["version"] == __version__
     assert data["quality_gate"]["status"] == "PASSED"
     assert data["quality_gate"]["passed"] is True
     assert data["summary"]["total_reads"] == 2
