@@ -1,14 +1,14 @@
 [project]
 name = "seq-qc-probe"
-version = "0.1.0"
-description = "High-throughput, single-pass FASTQ quality control and structural integrity gate with zero runtime dependencies."
+version = "0.2.0"
+description = "High-throughput, single-pass FASTQ, VCF, and SAM pre-flight quality control and structural integrity gate with zero runtime dependencies."
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Melih Eliguzel" }
 ]
-keywords = ["bioinformatics", "fastq", "ngs", "quality-control", "phred", "genomics"]
+keywords = ["bioinformatics", "fastq", "vcf", "sam", "bam", "cigar", "ngs", "quality-control", "genomics"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
