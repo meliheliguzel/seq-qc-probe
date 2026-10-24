@@ -23,7 +23,7 @@ RUN uv pip install --no-deps .
 FROM python:3.13-slim-bookworm AS runner
 
 LABEL org.opencontainers.image.title="seq-qc-probe" \
-      org.opencontainers.image.description="High-throughput streaming pre-flight FASTQ quality control gate" \
+      org.opencontainers.image.description="High-throughput streaming pre-flight FASTQ, VCF, and SAM quality control gate" \
       org.opencontainers.image.url="https://github.com/meliheliguzel/seq-qc-probe" \
       org.opencontainers.image.source="https://github.com/meliheliguzel/seq-qc-probe" \
       org.opencontainers.image.licenses="MIT"
