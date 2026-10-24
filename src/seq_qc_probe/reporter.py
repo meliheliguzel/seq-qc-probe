@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from .models import CheckResult, VCFValidationSummary
+from .models import AlignmentValidationSummary, CheckResult, VCFValidationSummary
 from .version import __version__
 
 
@@ -284,6 +284,136 @@ class VCFReporter(BaseReporter):
                 lines.append(
                     f"  [Line {err.line_number}] [{err.error_kind.name}] {err.message}{col_info}"
                 )
+        return "\n".join(lines) + "\n"
+
+    def print_terminal_summary(
+        self, stdout: TextIO | None = None, stderr: TextIO | None = None
+    ) -> None:
+        """Prints terminal summary to stdout or stderr depending on pass/fail."""
+        out = sys.stdout if stdout is None else stdout
+        err = sys.stderr if stderr is None else stderr
+
+        if self.summary.is_valid:
+            out.write(self.format_text_summary())
+        else:
+            err.write(self.format_text_summary())
+
+
+class AlignmentReporter(BaseReporter):
+    """Handles serialization and formatting of SAM/BAM alignment validation and MAPQ results."""
+
+    def __init__(
+        self,
+        summary: AlignmentValidationSummary,
+        input_file: str | Path = "",
+        max_errors: int | None = None,
+    ) -> None:
+        self.summary = summary
+        self.input_file = str(input_file)
+        self.max_errors = max_errors
+
+    def to_dict(self) -> dict[str, Any]:
+        """Builds a structured JSON-serializable dictionary report for SAM validation."""
+        s = self.summary
+        error_dist = {kind.name: count for kind, count in s.error_distribution.items() if count > 0}
+        mapq = s.mapq_summary
+
+        return {
+            "schema_version": "1.0.0",
+            "meta": {
+                "tool": "seq-qc-probe",
+                "version": __version__,
+                "command": "sam-check",
+                "timestamp": self.get_iso_timestamp(),
+                "input_file": self.input_file,
+                "thresholds": {
+                    "max_errors": self.max_errors,
+                },
+            },
+            "validation_gate": {
+                "status": "PASSED" if s.is_valid else "FAILED",
+                "passed": s.is_valid,
+                "exit_code": 0 if s.is_valid else 1,
+                "total_errors": s.total_errors,
+                "error_distribution": error_dist,
+                "errors": [
+                    {
+                        "line_number": err.line_number,
+                        "error_kind": err.error_kind.name,
+                        "message": err.message,
+                        "qname": err.qname,
+                        "cigar": err.cigar,
+                        "expected_length": err.expected_length,
+                        "actual_length": err.actual_length,
+                        "column": err.column,
+                    }
+                    for err in s.errors
+                ],
+            },
+            "mapq_metrics": {
+                "total_reads": mapq.total_reads,
+                "mapq_zero_count": mapq.mapq_zero_count,
+                "mapq_zero_rate": mapq.mapq_zero_rate,
+                "multimapping_rate": mapq.multimapping_rate,
+                "mean_mapq": mapq.mean_mapq,
+                "mapq_distribution": mapq.mapq_distribution,
+            },
+            "summary": {
+                "total_records_evaluated": s.total_records_evaluated,
+                "total_errors": s.total_errors,
+                "is_valid": s.is_valid,
+            },
+        }
+
+    def format_text_summary(self) -> str:
+        """Formats standard human-readable terminal output for SAM validation."""
+        s = self.summary
+        mapq = s.mapq_summary
+        pct_zero = mapq.mapq_zero_rate * 100.0
+
+        mapq_block = textwrap.dedent(f"""\
+            MAPQ & Multimapping Metrics:
+              Total Reads: {mapq.total_reads}
+              Mean MAPQ: {mapq.mean_mapq:.2f}
+              MAPQ = 0 (Multimapped): {mapq.mapq_zero_count} ({pct_zero:.2f}%)
+        """).strip()
+
+        if s.is_valid:
+            header_block = textwrap.dedent(f"""\
+                Validation PASSED: SAM alignment file is valid.
+                Total Records Evaluated: {s.total_records_evaluated}
+                Total Errors: 0
+            """).strip()
+            return f"{header_block}\n\n{mapq_block}\n"
+
+        lines = [
+            f"Validation FAILED: Found {s.total_errors} error(s) "
+            f"across {s.total_records_evaluated} record(s).",
+            "",
+            mapq_block,
+            "",
+            "Error Breakdown:",
+        ]
+        for kind, count in s.error_distribution.items():
+            if count > 0:
+                lines.append(f"  - {kind.name}: {count}")
+
+        if s.errors:
+            lines.append("")
+            lines.append("Errors:")
+            for err in s.errors:
+                context_parts: list[str] = []
+                if err.qname:
+                    context_parts.append(f"Read: {err.qname}")
+                if err.cigar:
+                    context_parts.append(f"CIGAR: {err.cigar}")
+                if err.column:
+                    context_parts.append(f"Column: {err.column}")
+                ctx_info = f" ({', '.join(context_parts)})" if context_parts else ""
+                lines.append(
+                    f"  [Line {err.line_number}] [{err.error_kind.name}]{ctx_info} {err.message}"
+                )
+
         return "\n".join(lines) + "\n"
 
     def print_terminal_summary(
