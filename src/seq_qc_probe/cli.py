@@ -2,8 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from seq_qc_probe.alignment_validator import AlignmentValidator
 from seq_qc_probe.checker import FASTQChecker
-from seq_qc_probe.reporter import QCReporter, VCFReporter
+from seq_qc_probe.reporter import AlignmentReporter, QCReporter, VCFReporter
 from seq_qc_probe.vcf_validator import VCFValidator
 
 
@@ -11,7 +12,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build and configure the top-level argument parser and subcommands."""
     parser = argparse.ArgumentParser(
         prog="seq-qc-probe",
-        description="Fast pre-flight FASTQ and VCF structural integrity validator.",
+        description="Fast pre-flight FASTQ, VCF, and SAM/BAM structural integrity validator.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -101,6 +102,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write validation report in JSON format to the specified file path.",
     )
 
+    # 3. SAM sam-check subcommand
+    sam_parser = subparsers.add_parser(
+        "sam-check",
+        help="Validate SAM/BAM alignments, CIGAR strings, and MAPQ metrics",
+    )
+    sam_parser.add_argument(
+        "-i",
+        "--input",
+        dest="file",
+        type=str,
+        required=True,
+        help="Path to the SAM file to validate (or '-' for standard input).",
+    )
+    sam_parser.add_argument(
+        "--max-errors",
+        type=int,
+        default=10,
+        help="Maximum number of validation errors to display before aborting (default: 10).",
+    )
+    sam_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress all standard output; only return exit code.",
+    )
+    sam_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output validation results and summary in JSON format to stdout.",
+    )
+    sam_parser.add_argument(
+        "-o",
+        "--output-json",
+        dest="output_json",
+        type=str,
+        default=None,
+        help="Write validation report in JSON format to the specified file path.",
+    )
+
     return parser
 
 
@@ -164,6 +204,38 @@ def handle_vcf_check(args: argparse.Namespace) -> int:
     return 0 if summary.is_valid else 1
 
 
+def handle_sam_check(args: argparse.Namespace) -> int:
+    """Delegates sam-check command execution to AlignmentValidator and AlignmentReporter."""
+    if args.file != "-":
+        input_path = Path(args.file)
+        if not input_path.is_file():
+            if not args.quiet:
+                sys.stderr.write(f"Error: File not found: {args.file}\n")
+            return 2
+
+    validator = AlignmentValidator(
+        file_path=args.file,
+        max_errors=args.max_errors,
+    )
+    summary = validator.validate()
+
+    reporter = AlignmentReporter(
+        summary=summary,
+        input_file=args.file,
+        max_errors=args.max_errors,
+    )
+
+    if args.output_json:
+        reporter.write_json(args.output_json)
+
+    if args.json:
+        reporter.print_json()
+    elif not args.quiet:
+        reporter.print_terminal_summary()
+
+    return 0 if summary.is_valid else 1
+
+
 def main(argv: list[str] | None = None) -> None:
     """Main CLI entrypoint."""
     parser = build_parser()
@@ -173,6 +245,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(handle_check(args))
     elif args.command == "vcf-check":
         sys.exit(handle_vcf_check(args))
+    elif args.command == "sam-check":
+        sys.exit(handle_sam_check(args))
     sys.exit(0)
 
 
