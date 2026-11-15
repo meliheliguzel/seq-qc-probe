@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.title="seq-qc-probe" \
       org.opencontainers.image.source="https://github.com/meliheliguzel/seq-qc-probe" \
       org.opencontainers.image.licenses="MIT"
 
+RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/* 
 RUN groupadd -r bio && useradd -r -g bio -u 1000 bio
 
 WORKDIR /app
@@ -40,5 +41,4 @@ ENV PYTHONUNBUFFERED=1
 USER bio
 WORKDIR /data
 
-ENTRYPOINT ["seq-qc-probe"]
-CMD ["--help"]
+CMD ["seq-qc-probe", "--help"]
