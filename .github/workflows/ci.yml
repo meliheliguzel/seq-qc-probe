@@ -60,11 +60,12 @@ jobs:
 
       - name: Verify CLI Help in Container
         run: |
-          docker run --rm seq-qc-probe:ci-test --help
-          docker run --rm seq-qc-probe:ci-test check --help
-          docker run --rm seq-qc-probe:ci-test vcf-check --help
-          docker run --rm seq-qc-probe:ci-test sam-check --help
+          docker run --rm seq-qc-probe:ci-test
+          docker run --rm seq-qc-probe:ci-test seq-qc-probe --help
+          docker run --rm seq-qc-probe:ci-test seq-qc-probe check --help
+          docker run --rm seq-qc-probe:ci-test seq-qc-probe vcf-check --help
+          docker run --rm seq-qc-probe:ci-test seq-qc-probe sam-check --help
 
       - name: Smoke Test Validation on Real Fixture
         run: |
-          docker run --rm -v "${{ github.workspace }}/tests/fixtures:/data:ro" seq-qc-probe:ci-test check --input /data/valid.fastq --min-q 28
+          docker run --rm -v "${{ github.workspace }}/tests/fixtures:/data:ro" seq-qc-probe:ci-test seq-qc-probe check --input /data/valid.fastq --min-q 28
